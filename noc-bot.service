@@ -1,0 +1,12 @@
+[Unit]
+Description=NOC Telegram Bot
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/noc-ai
+ExecStart=/opt/noc-ai/venv/bin/python /opt/noc-ai/app/bot.py
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
