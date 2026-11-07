@@ -12,16 +12,16 @@ A lightweight **read-only NOC command interface** for a two-resolver Unbound DNS
 
 | Command | What it returns |
 | --- | --- |
-| \`/status dns1\` / \`/status dns2\` | Resolver QPS, 24-hour peak, SERVFAIL, NXDOMAIN, cache hit ratio, CPU, memory, conntrack |
-| \`/status_dns1\` / \`/status_dns2\` | Shortcuts for per-resolver status |
-| \`/health\` | Aggregated resolver report, traffic split and an imbalance warning |
-| \`/alerts\` | Currently firing Prometheus alerts and severities |
-| \`/compare\` | DNS1 vs DNS2 QPS |
-| \`/summary\` | Combined QPS and active-alert count |
-| \`/analyze dns1\` | Resolver load estimate, failures, cache effectiveness |
-| \`/conntrack\` | Conntrack use/limit and threshold warnings |
-| \`/graph dns1\` / \`/graph dns2\` | Six-hour resolver QPS plots generated with Matplotlib |
-| \`/overlay\` | Comparative DNS QPS plot |
+| `/status dns1` / `/status dns2` | Resolver QPS, 24-hour peak, SERVFAIL, NXDOMAIN, cache hit ratio, CPU, memory, conntrack |
+| `/status_dns1` / `/status_dns2` | Shortcuts for per-resolver status |
+| `/health` | Aggregated resolver report, traffic split and an imbalance warning |
+| `/alerts` | Currently firing Prometheus alerts and severities |
+| `/compare` | DNS1 vs DNS2 QPS |
+| `/summary` | Combined QPS and active-alert count |
+| `/analyze dns1` | Resolver load estimate, failures, cache effectiveness |
+| `/conntrack` | Conntrack use/limit and threshold warnings |
+| `/graph dns1` / `/graph dns2` | Six-hour resolver QPS plots generated with Matplotlib |
+| `/overlay` | Comparative DNS QPS plot |
 
 The bot uses the **Prometheus HTTP API**: instant vector queries for operational summaries and range queries for charts. It does **not** modify Unbound, firewall rules, or alerts.
 
@@ -40,10 +40,10 @@ flowchart LR
 ## Technical notes
 
 - **Main implementation:** [bot.py](bot.py) — Telegram command handlers and Prometheus queries.
-- **Environment template:** [.env.example](.env.example) defines \`BOT_TOKEN\` and \`PROM_URL\`.
+- **Environment template:** [.env.example](.env.example) defines `BOT_TOKEN` and `PROM_URL`.
 - **Service example:** [noc-bot.service](noc-bot.service) is environment-specific and **must not be copied to production as-is**.
-- **Dependencies:** the present \`requirements.txt\` is empty; the code imports \`python-telegram-bot\`, \`requests\`, \`python-dotenv\`, and \`matplotlib\`. Pin and test compatible versions before deployment.
-- **Host discovery:** \`HOST_MAP\` is currently hard-coded in the Python source; do not treat the example as a portable configuration.
+- **Dependencies:** the present `requirements.txt` is empty; the code imports `python-telegram-bot`, `requests`, `python-dotenv`, and `matplotlib`. Pin and test compatible versions before deployment.
+- **Host discovery:** `HOST_MAP` is currently hard-coded in the Python source; do not treat the example as a portable configuration.
 
 ## Security work required before production use
 
