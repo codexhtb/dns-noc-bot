@@ -1,12 +1,35 @@
 [Unit]
-Description=NOC Telegram Bot
-After=network.target
+Description=DNS NOC Telegram Bot (Prometheus read-only)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
+Type=simple
+# Create this system user/group before enabling the service.
+User=dns-noc-bot
+Group=dns-noc-bot
+# Existing deployment paths retained; adjust to your installation as needed.
 WorkingDirectory=/opt/noc-ai
 ExecStart=/opt/noc-ai/venv/bin/python /opt/noc-ai/app/bot.py
-Restart=always
-User=root
+EnvironmentFile=/etc/dns-noc-bot/dns-noc-bot.env
+Environment=MPLCONFIGDIR=/run/dns-noc-bot/matplotlib
+RuntimeDirectory=dns-noc-bot
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
