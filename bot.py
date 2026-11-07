@@ -4,20 +4,77 @@ import io
 import matplotlib.pyplot as plt
 
 from datetime import datetime, timedelta
+from functools import wraps
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PROM_URL = os.getenv("PROM_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+PROM_URL = os.getenv("PROM_URL", "").strip().rstrip("/")
 
+# Prometheus node_exporter instance labels. Do not store production IPs in Git.
 HOST_MAP = {
-    "dns1": "172.24.68.20:9100",
-    "proxmox": "172.24.68.10:9100",
-    "dns2": "172.24.68.21:9100",
+    "dns1": os.getenv("DNS1_NODE_EXPORTER", "").strip(),
+    "dns2": os.getenv("DNS2_NODE_EXPORTER", "").strip(),
 }
+CONNTRACK_NODE = os.getenv("CONNTRACK_NODE_EXPORTER", "").strip()
+
+
+def parse_allowed_ids(env_name: str) -> set[int]:
+    """Parse comma-separated Telegram numeric IDs; never accept wildcard access."""
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return set()
+    try:
+        return {int(item.strip()) for item in raw.split(",") if item.strip()}
+    except ValueError as exc:
+        raise RuntimeError(f"{env_name} must be a comma-separated list of numeric IDs") from exc
+
+
+ALLOWED_USER_IDS = parse_allowed_ids("TELEGRAM_ALLOWED_USER_IDS")
+ALLOWED_CHAT_IDS = parse_allowed_ids("TELEGRAM_ALLOWED_CHAT_IDS")
+
+
+def validate_configuration() -> None:
+    """Fail closed instead of starting with public Telegram access."""
+    required = {
+        "BOT_TOKEN": BOT_TOKEN,
+        "PROM_URL": PROM_URL,
+        "DNS1_NODE_EXPORTER": HOST_MAP["dns1"],
+        "DNS2_NODE_EXPORTER": HOST_MAP["dns2"],
+        "CONNTRACK_NODE_EXPORTER": CONNTRACK_NODE,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError("Missing configuration: " + ", ".join(missing))
+    if not ALLOWED_USER_IDS or not ALLOWED_CHAT_IDS:
+        raise RuntimeError(
+            "TELEGRAM_ALLOWED_USER_IDS and TELEGRAM_ALLOWED_CHAT_IDS "
+            "must both contain at least one numeric ID"
+        )
+    if not PROM_URL.startswith(("http://", "https://")):
+        raise RuntimeError("PROM_URL must begin with http:// or https://")
+
+
+def require_authorization(handler):
+    """Authenticate both the Telegram user and chat before invoking a command."""
+    @wraps(handler)
+    async def secured(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        chat = update.effective_chat
+        if (
+            user is None or chat is None
+            or user.id not in ALLOWED_USER_IDS
+            or chat.id not in ALLOWED_CHAT_IDS
+        ):
+            if update.effective_message is not None:
+                await update.effective_message.reply_text("Access denied")
+            return
+        return await handler(update, context)
+
+    return secured
 
 # -------------------------
 # PROMETHEUS HELPERS
@@ -88,10 +145,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ram = val(f'node_memory_MemAvailable_bytes{{instance="{node}"}}')
 
-    ram = val(
-        f'node_memory_MemAvailable_bytes{{instance="{node}"}}'
-    )
-
     conntrack_pct = val(
         f'(node_nf_conntrack_entries{{instance="{node}"}} / '
         f'node_nf_conntrack_entries_limit{{instance="{node}"}}) * 100'
@@ -121,7 +174,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def conntrack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    node = "172.24.68.10:9100"
+    node = CONNTRACK_NODE
     
     pct = val(
         f'(node_nf_conntrack_entries{{instance="{node}"}} / '
@@ -162,11 +215,6 @@ async def graph_dns1(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def graph_dns2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.args = ["dns2"]
-    await graph(update, context)
-
-
-async def graph_overlay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.args = []  # overlay режим
     await graph(update, context)
 
 
@@ -319,6 +367,9 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     host = context.args[0]
+    if host not in HOST_MAP:
+        await update.message.reply_text("Unknown host")
+        return
 
     qps = val(f'unbound:qps:15s{{instance="{host}"}}')
     peak = val(f'max_over_time(unbound:qps:15s{{instance="{host}"}}[24h])')
@@ -357,6 +408,9 @@ async def graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     host = context.args[0]
+    if host not in HOST_MAP:
+        await update.message.reply_text("Unknown host")
+        return
 
     end = datetime.utcnow()
     start = end - timedelta(hours=6)
@@ -439,23 +493,23 @@ async def overlay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # -------------------------
 def main():
-
+    validate_configuration()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("status_dns1", status_dns1))
-    app.add_handler(CommandHandler("status_dns2", status_dns2))
-    app.add_handler(CommandHandler("health", health))
-    app.add_handler(CommandHandler("alerts", alerts))
-    app.add_handler(CommandHandler("compare", compare))
-    app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(CommandHandler("analyze", analyze))
-    app.add_handler(CommandHandler("graphdns_1", graph_dns1))
-    app.add_handler(CommandHandler("graphdns_2", graph_dns2))
-#    app.add_handler(CommandHandler("overlay", graph_overlay))
-    app.add_handler(CommandHandler("graph", graph))
-    app.add_handler(CommandHandler("overlay", overlay))
-    app.add_handler(CommandHandler("conntrack", conntrack))
+    app.add_handler(CommandHandler("status", require_authorization(status)))
+    app.add_handler(CommandHandler("status_dns1", require_authorization(status_dns1)))
+    app.add_handler(CommandHandler("status_dns2", require_authorization(status_dns2)))
+    app.add_handler(CommandHandler("health", require_authorization(health)))
+    app.add_handler(CommandHandler("alerts", require_authorization(alerts)))
+    app.add_handler(CommandHandler("compare", require_authorization(compare)))
+    app.add_handler(CommandHandler("summary", require_authorization(summary)))
+    app.add_handler(CommandHandler("analyze", require_authorization(analyze)))
+    app.add_handler(CommandHandler("graphdns_1", require_authorization(graph_dns1)))
+    app.add_handler(CommandHandler("graphdns_2", require_authorization(graph_dns2)))
+#    app.add_handler(CommandHandler("overlay", require_authorization(graph_overlay)))
+    app.add_handler(CommandHandler("graph", require_authorization(graph)))
+    app.add_handler(CommandHandler("overlay", require_authorization(overlay)))
+    app.add_handler(CommandHandler("conntrack", require_authorization(conntrack)))
 
     app.run_polling()
 
